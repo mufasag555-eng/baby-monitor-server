@@ -1,0 +1,12 @@
+{
+  "name": "baby-monitor-signaling",
+  "version": "1.0.0",
+  "description": "WebRTC signaling server for Baby Monitor app",
+  "main": "signaling-server.js",
+  "scripts": {
+    "start": "node signaling-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2"
+  }
+}
