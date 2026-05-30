@@ -77,6 +77,7 @@ wss.on('connection', (ws, req) => {
 
         case 'offer':
         case 'ice_candidate':
+        case 'device_info':
           // Forward to all viewers
           r.viewers.forEach(v => send(v, msg));
           break;
