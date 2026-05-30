@@ -1,5 +1,5 @@
 /**
- * Baby Monitor — WebRTC Signaling Server (Fixed)
+ * Baby Monitor — WebRTC Signaling Server v11
  * Run: node signaling-server.js
  * Requires: npm install ws
  */
@@ -29,9 +29,9 @@ function send(ws, obj) {
 }
 
 wss.on('connection', (ws, req) => {
-  const url   = new URL(req.url, `http://localhost:${PORT}`);
-  const room  = url.searchParams.get('room') || 'default';
-  const role  = url.searchParams.get('role') || 'viewer';
+  const url  = new URL(req.url, `http://localhost:${PORT}`);
+  const room = url.searchParams.get('room') || 'default';
+  const role = url.searchParams.get('role') || 'viewer';
 
   ws.room = room;
   ws.role = role;
@@ -42,18 +42,22 @@ wss.on('connection', (ws, req) => {
   if (role === 'broadcaster') {
     r.broadcaster = ws;
     log(`Broadcaster joined room: ${room}`);
-    // Don't notify viewers yet — wait for broadcaster to send "ready"
+    // Don't do anything yet — wait for broadcaster to send "ready"
 
   } else {
     r.viewers.push(ws);
     log(`Viewer joined room: ${room}`);
-    // Don't notify broadcaster yet — wait for viewer to send "viewer_ready"
-    // Just tell viewer whether broadcaster is present
-    if (r.broadcaster) {
-      send(ws, { type: 'broadcaster_present' });
-    } else {
+    // FIX: Do NOT send broadcaster_present here.
+    // The viewer sends viewer_ready/viewer_reconnected right after connecting,
+    // which is the single trigger that makes the broadcaster create an offer.
+    // Sending broadcaster_present AND processing viewer_ready caused a double
+    // trigger → broadcaster built the PC twice → second teardown killed ICE.
+    if (!r.broadcaster) {
+      // Only tell viewer to wait if broadcaster isn't there at all
       send(ws, { type: 'waiting', message: 'Broadcaster not connected yet' });
     }
+    // If broadcaster IS present, stay silent — viewer_ready/viewer_reconnected
+    // arrives in milliseconds and is the correct single trigger.
   }
 
   ws.on('message', (data) => {
@@ -83,8 +87,12 @@ wss.on('connection', (ws, req) => {
       switch (msg.type) {
 
         case 'viewer_ready':
-          // Viewer is ready — NOW tell broadcaster to create offer
+        case 'viewer_reconnected':
+          // Single entry point: viewer signals it's ready → tell broadcaster.
+          // broadcaster_present is no longer sent on connect, so this fires
+          // exactly ONCE per viewer connection, no race condition possible.
           if (r.broadcaster) {
+            // Always forward as viewer_joined — broadcaster handles both cases.
             send(r.broadcaster, { type: 'viewer_joined' });
           } else {
             send(ws, { type: 'waiting', message: 'Broadcaster not connected' });
@@ -93,7 +101,6 @@ wss.on('connection', (ws, req) => {
 
         case 'answer':
         case 'ice_candidate':
-          // Forward to broadcaster
           send(r.broadcaster, msg);
           break;
       }
@@ -108,7 +115,7 @@ wss.on('connection', (ws, req) => {
     } else {
       r.viewers = r.viewers.filter(v => v !== ws);
       log(`Viewer left: ${room}`);
-      send(r.broadcaster, { type: 'viewer_left' });
+      if (r.broadcaster) send(r.broadcaster, { type: 'viewer_left' });
     }
     if (!r.broadcaster && r.viewers.length === 0) {
       delete rooms[room];
